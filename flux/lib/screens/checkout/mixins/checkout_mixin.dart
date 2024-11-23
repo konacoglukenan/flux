@@ -22,6 +22,8 @@ import '../../../models/user_model.dart';
 import '../../../modules/analytics/analytics.dart';
 import '../../../modules/dynamic_layout/helper/helper.dart';
 import '../../../modules/native_payment/flutterwave/services.dart';
+import '../../../modules/native_payment/iyzico/index.dart';
+import '../../../modules/native_payment/iyzico/services.dart';
 import '../../../modules/native_payment/mercado_pago/index.dart';
 import '../../../modules/native_payment/paystack/services.dart';
 import '../../../modules/native_payment/paytm/services.dart';
@@ -455,6 +457,77 @@ mixin CheckoutMixin<T extends StatefulWidget> on State<T>, RazorDelegate {
                   isPaying = false;
                   unawaited(_deletePendingOrder(order.id));
                 }
+              }
+            });
+        return;
+      }
+
+      /// iyzico payment.
+      final availableIyzico = paymentMethod.id!.contains('iyzico');
+      if (!isSubscriptionProduct && availableIyzico) {
+        if (cartModel.currencyCode?.toUpperCase() != 'TRY') {
+          isPaying = false;
+          onLoading?.call(false);
+          return Tools.showSnackBar(
+              ScaffoldMessenger.of(context),
+              S.of(context).currencyIsNotSupported(
+                  cartModel.currencyCode?.toUpperCase() ?? ''));
+        }
+        createOrderOnWebsite(
+            paid: false,
+            hideLoading: false,
+            onFinish: (Order? order) {
+              if (order != null) {
+                IyzicoServices()
+                    .getCheckoutUrl(orderId: order.id ?? '')
+                    .then((checkout) async {
+                  if (checkout == null) {
+                    onLoading?.call(false);
+                    isPaying = false;
+                    unawaited(_deletePendingOrder(order.id));
+                    return;
+                  }
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (ctx) => IyzicoPayment(
+                              checkout: checkout,
+                              orderId: order.id ?? '',
+                              onFailed: () {
+                                onLoading?.call(false);
+                                isPaying = false;
+                                unawaited(_deletePendingOrder(order.id));
+                              },
+                              onComplete: (checkPaymentSuccess) {
+                                checkPaymentSuccess.then((bool? result) {
+                                  onLoading?.call(false);
+                                  isPaying = false;
+                                  if (result == true) {
+                                    onFinish!(order);
+                                  } else {
+                                    Tools.showSnackBar(
+                                        ScaffoldMessenger.of(context),
+                                        'Error check payment');
+                                    unawaited(_deletePendingOrder(order.id));
+                                  }
+                                }).catchError((e) {
+                                  Tools.showSnackBar(
+                                      ScaffoldMessenger.of(context),
+                                      e.toString());
+                                  onLoading?.call(false);
+                                  isPaying = false;
+                                  unawaited(_deletePendingOrder(order.id));
+                                });
+                              },
+                            )),
+                  );
+                }).catchError((e) {
+                  Tools.showSnackBar(
+                      ScaffoldMessenger.of(context), e.toString());
+                  onLoading?.call(false);
+                  isPaying = false;
+                  unawaited(_deletePendingOrder(order.id));
+                });
               }
             });
         return;
